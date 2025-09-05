@@ -36,11 +36,11 @@ class ImprovedPDFReportGenerator:
             fontSize=24,
             textColor=colors.HexColor('#1a1a1a'),
             spaceAfter=30,
-            alignment=TA_CENTER,
+            alignment=TA_LEFT,
             fontName='Helvetica-Bold'
         ))
         
-        # Section header style
+        # Section header style - clean and professional
         self.styles.add(ParagraphStyle(
             name='SectionHeader',
             parent=self.styles['Heading1'],
@@ -50,19 +50,19 @@ class ImprovedPDFReportGenerator:
             spaceAfter=15,
             leftIndent=0,
             fontName='Helvetica-Bold',
-            borderWidth=2,
-            borderColor=colors.HexColor('#2c3e50'),
-            borderPadding=3
+            borderWidth=0,
+            borderPadding=(0, 0, 8, 2),
+            borderColor=colors.HexColor('#3498db')
         ))
         
         # Subsection header style
         self.styles.add(ParagraphStyle(
             name='SubsectionHeader',
             parent=self.styles['Heading2'],
-            fontSize=13,
+            fontSize=14,
             textColor=colors.HexColor('#34495e'),
-            spaceBefore=15,
-            spaceAfter=10,
+            spaceBefore=18,
+            spaceAfter=12,
             fontName='Helvetica-Bold'
         ))
         
@@ -131,11 +131,24 @@ class ImprovedPDFReportGenerator:
             if not para:
                 continue
             
-            # Check for headers (## Header)
-            if para.startswith('##'):
+            # Check for headers (# Header or ## Header)
+            if para.startswith('#'):
+                # Count the number of # symbols
+                level = len(para) - len(para.lstrip('#'))
                 header_text = para.lstrip('#').strip()
-                flowables.append(Paragraph(header_text, self.styles['SubsectionHeader']))
-                flowables.append(Spacer(1, 6))
+                
+                if level == 1:
+                    # H1 header - use SubsectionHeader style for prominent display
+                    flowables.append(Paragraph(header_text, self.styles['SubsectionHeader']))
+                    flowables.append(Spacer(1, 8))
+                elif level == 2:
+                    # H2 header - use CustomBody with bold
+                    flowables.append(Paragraph(f'<b>{header_text}</b>', self.styles['CustomBody']))
+                    flowables.append(Spacer(1, 6))
+                else:
+                    # H3+ headers
+                    flowables.append(Paragraph(f'<b>{header_text}</b>', self.styles['CustomBody']))
+                    flowables.append(Spacer(1, 4))
                 continue
             
             # Check for bullet points
@@ -158,18 +171,17 @@ class ImprovedPDFReportGenerator:
     
     def _process_inline_markdown(self, text: str) -> str:
         """Process inline markdown (bold, italic) to HTML for ReportLab"""
+        # First escape existing HTML characters
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;')
+        text = text.replace('>', '&gt;')
+        
+        # Then replace markdown with HTML tags
         # Replace **bold** with <b>bold</b>
         text = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
         
-        # Replace *italic* with <i>italic</i>
-        text = re.sub(r'\*([^*]+)\*', r'<i>\1</i>', text)
-        
-        # Escape special characters for HTML
-        text = text.replace('&', '&amp;')
-        text = text.replace('<', '&lt;').replace('>', '&gt;')
-        # Restore our formatting tags
-        text = text.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>')
-        text = text.replace('&lt;i&gt;', '<i>').replace('&lt;/i&gt;', '</i>')
+        # Replace *italic* with <i>italic</i> (but not if it's part of **)
+        text = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'<i>\1</i>', text)
         
         return text
     
@@ -204,11 +216,16 @@ class ImprovedPDFReportGenerator:
         # Metadata section with better formatting
         if metadata:
             meta_data = [
-                ['<b>Thema:</b>', metadata.get('topic', 'N/A')],
-                ['<b>Dozent:</b>', metadata.get('host_email', 'N/A')],
-                ['<b>Dauer:</b>', f"{metadata.get('duration', 'N/A')} Minuten"],
-                ['<b>Datum:</b>', datetime.now().strftime('%d.%m.%Y')],
-                ['<b>Meeting ID:</b>', metadata.get('meeting_id', 'N/A')],
+                [Paragraph('<b>Thema:</b>', self.styles['CustomBody']), 
+                 Paragraph(metadata.get('topic', 'N/A'), self.styles['CustomBody'])],
+                [Paragraph('<b>Dozent:</b>', self.styles['CustomBody']), 
+                 Paragraph(metadata.get('host_email', 'N/A'), self.styles['CustomBody'])],
+                [Paragraph('<b>Dauer:</b>', self.styles['CustomBody']), 
+                 Paragraph(f"{metadata.get('duration', 'N/A')} Minuten", self.styles['CustomBody'])],
+                [Paragraph('<b>Datum:</b>', self.styles['CustomBody']), 
+                 Paragraph(datetime.now().strftime('%d.%m.%Y'), self.styles['CustomBody'])],
+                [Paragraph('<b>Meeting ID:</b>', self.styles['CustomBody']), 
+                 Paragraph(metadata.get('meeting_id', 'N/A'), self.styles['CustomBody'])],
             ]
             meta_table = Table(meta_data, colWidths=[3.5*cm, 13*cm])
             meta_table.setStyle(TableStyle([
@@ -226,29 +243,36 @@ class ImprovedPDFReportGenerator:
         
         # Overall Score Section with visual improvement
         story.append(Paragraph("Gesamtbewertung", self.styles['SectionHeader']))
+        story.append(Spacer(1, 0.3*cm))
         
         overall_score = complete_report.get('overall_score', 0)
         score_color = self._get_score_color(overall_score)
         
-        # Create score visualization
+        # Create score visualization with truly consistent text sizes
+        label_style = ParagraphStyle('LabelStyle', parent=self.styles['CustomBody'], fontSize=11, textColor=colors.HexColor('#5a6c7d'))
+        value_style = ParagraphStyle('ValueStyle', parent=self.styles['CustomBody'], fontSize=11, fontName='Helvetica-Bold')
+        
         score_data = [
-            ['<b>Gesamtpunktzahl:</b>', f'<font size="16" color="{score_color.hexval()}">{overall_score:.1f} / 5.0</font>'],
-            ['<b>Bewertung:</b>', f'<font color="{score_color.hexval()}">{self._get_score_rating(overall_score)}</font>'],
-            ['<b>Blöcke analysiert:</b>', str(complete_report.get('total_blocks', 0))],
+            [Paragraph('Gesamtpunktzahl:', label_style), 
+             Paragraph(f'<font color="{score_color.hexval()}"><b>{overall_score:.1f} / 5.0</b></font>', value_style)],
+            [Paragraph('Bewertung:', label_style), 
+             Paragraph(f'<font color="{score_color.hexval()}"><b>{self._get_score_rating(overall_score)}</b></font>', value_style)],
+            [Paragraph('Blöcke analysiert:', label_style), 
+             Paragraph(f'<b>{complete_report.get("total_blocks", 0)}</b>', value_style)],
         ]
         
-        score_table = Table(score_data, colWidths=[4.5*cm, 12*cm])
+        score_table = Table(score_data, colWidths=[5*cm, 11.5*cm])
         score_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 12),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8f9fa')),
-            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#e0e0e0')),
-            ('LEFTPADDING', (0, 0), (-1, -1), 10),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('BOX', (0, 0), (-1, -1), 1.5, colors.HexColor('#3498db')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
         ]))
         story.append(score_table)
         
@@ -256,33 +280,44 @@ class ImprovedPDFReportGenerator:
         
         # Criteria Scores with improved table
         story.append(Paragraph("Bewertung nach Kriterien", self.styles['SectionHeader']))
+        story.append(Spacer(1, 0.3*cm))
         
         criteria_scores = complete_report.get('criteria_scores', {})
-        criteria_data = [['<b>Kriterium</b>', '<b>Punkte</b>', '<b>Bewertung</b>']]
+        # Create header row with Paragraph objects - consistent sizing
+        header_style = ParagraphStyle('HeaderStyle', parent=self.styles['Normal'], 
+                                     textColor=colors.white, fontName='Helvetica-Bold', fontSize=12, alignment=TA_CENTER)
+        cell_style = ParagraphStyle('CellStyle', parent=self.styles['Normal'], fontSize=11, textColor=colors.HexColor('#2c3e50'))
+        score_style = ParagraphStyle('ScoreCellStyle', parent=self.styles['Normal'], fontSize=11, fontName='Helvetica-Bold', alignment=TA_CENTER)
+        
+        criteria_data = [[
+            Paragraph('Kriterium', header_style), 
+            Paragraph('Punkte', header_style), 
+            Paragraph('Bewertung', header_style)
+        ]]
         
         for criterion, score in criteria_scores.items():
             score_color = self._get_score_color(score)
             criteria_data.append([
-                criterion,
-                f'<font color="{score_color.hexval()}">{score:.1f}</font>',
-                f'<font color="{score_color.hexval()}">{self._get_score_rating(score)}</font>'
+                Paragraph(criterion, cell_style),
+                Paragraph(f'<font color="{score_color.hexval()}"><b>{score:.1f}</b></font>', score_style),
+                Paragraph(f'<font color="{score_color.hexval()}"><b>{self._get_score_rating(score)}</b></font>', score_style)
             ])
         
         criteria_table = Table(criteria_data, colWidths=[8*cm, 3*cm, 5.5*cm])
         criteria_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#34495e')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498db')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('ALIGN', (1, 0), (2, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#d0d0d0')),
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
         ]))
         story.append(criteria_table)
         
@@ -291,6 +326,7 @@ class ImprovedPDFReportGenerator:
         
         # Executive Summary with markdown parsing
         story.append(Paragraph("Zusammenfassung", self.styles['SectionHeader']))
+        story.append(Spacer(1, 0.3*cm))
         summary = complete_report.get('summary', 'Keine Zusammenfassung verfügbar')
         
         # Parse markdown in summary
@@ -303,22 +339,24 @@ class ImprovedPDFReportGenerator:
         # Key Strengths with better formatting
         strengths = complete_report.get('strengths', [])
         if strengths:
-            story.append(Paragraph("Stärken", self.styles['SubsectionHeader']))
+            story.append(Paragraph("Stärken", self.styles['SectionHeader']))
+            story.append(Spacer(1, 0.3*cm))
             for strength in strengths:
                 # Clean and format strength text
                 strength_text = self._process_inline_markdown(strength)
                 story.append(Paragraph(f"• {strength_text}", self.styles['ListItem']))
-            story.append(Spacer(1, 0.5*cm))
+            story.append(Spacer(1, 0.8*cm))
         
         # Areas for Improvement with better formatting
         improvements = complete_report.get('improvements', [])
         if improvements:
-            story.append(Paragraph("Verbesserungspotenziale", self.styles['SubsectionHeader']))
+            story.append(Paragraph("Verbesserungspotenziale", self.styles['SectionHeader']))
+            story.append(Spacer(1, 0.3*cm))
             for improvement in improvements:
                 # Clean and format improvement text
                 improvement_text = self._process_inline_markdown(improvement)
                 story.append(Paragraph(f"• {improvement_text}", self.styles['ListItem']))
-            story.append(Spacer(1, 0.5*cm))
+            story.append(Spacer(1, 0.8*cm))
         
         # Recommendations on new page if they exist
         recommendations = complete_report.get('recommendations', [])
