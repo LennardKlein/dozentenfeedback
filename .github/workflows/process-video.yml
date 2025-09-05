@@ -1,0 +1,217 @@
+name: Process Zoom Video
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'Zoom video URL'
+        required: true
+        type: string
+      topic:
+        description: 'Meeting topic'
+        required: false
+        type: string
+        default: 'Unknown'
+      host_email:
+        description: 'Host email'
+        required: false
+        type: string
+        default: 'mail@lennard-klein.com'
+      duration:
+        description: 'Duration in minutes'
+        required: false
+        type: string
+        default: '60'
+      meeting_id:
+        description: 'Meeting ID'
+        required: false
+        type: string
+        default: 'Unknown'
+  
+  repository_dispatch:
+    types: [process-video]
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install FFmpeg
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Process video
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        ASSEMBLYAI_API_KEY: ${{ secrets.ASSEMBLYAI_API_KEY }}
+        GOOGLE_DRIVE_CREDENTIALS: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}
+        GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+      run: |
+        # Extract inputs
+        if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
+          VIDEO_URL="${{ github.event.client_payload.video_url }}"
+          TOPIC="${{ github.event.client_payload.topic }}"
+          HOST_EMAIL="${{ github.event.client_payload.host_email }}"
+          DURATION="${{ github.event.client_payload.duration }}"
+          MEETING_ID="${{ github.event.client_payload.meeting_id }}"
+        else
+          VIDEO_URL="${{ inputs.video_url }}"
+          TOPIC="${{ inputs.topic }}"
+          HOST_EMAIL="${{ inputs.host_email }}"
+          DURATION="${{ inputs.duration }}"
+          MEETING_ID="${{ inputs.meeting_id }}"
+        fi
+        
+        # Create Python script to process
+        cat > process_github.py << 'SCRIPT'
+        import os
+        import sys
+        from pathlib import Path
+        
+        # Add src to path
+        sys.path.insert(0, str(Path.cwd() / "src"))
+        
+        from app.transcription_url import transcribe_from_url
+        from app.chunker import TranscriptionChunker
+        from app.analyzer import LectureAnalyzer
+        from app.aggregator import ScoreAggregator
+        from app.formatter import MarkdownFormatter
+        from app.pdf_formatter import PDFReportGenerator
+        from app.google_drive_storage import GoogleDriveStorage
+        
+        # Get inputs from environment
+        video_url = os.environ['VIDEO_URL']
+        metadata = {
+            'topic': os.environ.get('TOPIC', 'Unknown'),
+            'host_email': os.environ.get('HOST_EMAIL', 'mail@lennard-klein.com'),
+            'duration': os.environ.get('DURATION', 'Unknown'),
+            'meeting_id': os.environ.get('MEETING_ID', 'Unknown')
+        }
+        
+        print(f"Processing video: {video_url}")
+        print(f"Metadata: {metadata}")
+        
+        # Process video
+        print("Step 1: Transcribing...")
+        vtt_content = transcribe_from_url(video_url, metadata=metadata)
+        
+        print("Step 2: Chunking...")
+        chunker = TranscriptionChunker()
+        blocks = chunker.chunk_from_vtt_content(vtt_content)
+        print(f"Created {len(blocks)} blocks")
+        
+        print("Step 3: Analyzing...")
+        analyzer = LectureAnalyzer()
+        block_analyses = []
+        for i, block in enumerate(blocks):
+            print(f"Analyzing block {i+1}/{len(blocks)}...")
+            analysis = analyzer.analyze_block(block)
+            block_analyses.append(analysis)
+        
+        print("Step 4: Aggregating...")
+        aggregator = ScoreAggregator()
+        complete_report = aggregator.create_complete_report(block_analyses)
+        
+        print("Step 5: Formatting...")
+        formatter = MarkdownFormatter()
+        markdown_report = formatter.format_complete_report(complete_report)
+        kurzfassung = formatter.format_kurzfassung(complete_report)
+        
+        print("Step 6: Generating PDF...")
+        pdf_generator = PDFReportGenerator()
+        report_data = {
+            'overall_score': complete_report.overall_score,
+            'total_blocks': len(blocks),
+            'criteria_scores': {
+                criterion.name: score 
+                for criterion, score in complete_report.criteria_scores.items()
+            },
+            'summary': kurzfassung,
+            'strengths': complete_report.overall_strengths[:5] if complete_report.overall_strengths else [],
+            'improvements': complete_report.overall_improvements[:5] if complete_report.overall_improvements else [],
+            'recommendations': complete_report.recommendations[:5] if complete_report.recommendations else []
+        }
+        
+        metadata['score'] = complete_report.overall_score
+        pdf_bytes = pdf_generator.generate_report_pdf(report_data, metadata)
+        
+        # Save to Google Drive if credentials available
+        if os.environ.get('GOOGLE_DRIVE_CREDENTIALS'):
+            print("Step 7: Uploading to Google Drive...")
+            try:
+                drive = GoogleDriveStorage()
+                filename = drive.generate_filename(metadata)
+                result = drive.upload_pdf(pdf_bytes, filename, metadata)
+                print(f"PDF uploaded to Google Drive: {result['web_view_link']}")
+                
+                # Save URL to GitHub output
+                with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                    f.write(f"google_drive_url={result['web_view_link']}\n")
+                    f.write(f"download_link={result['download_link']}\n")
+            except Exception as e:
+                print(f"Failed to upload to Google Drive: {e}")
+        
+        # Save locally as artifact
+        output_path = "output/report.pdf"
+        os.makedirs("output", exist_ok=True)
+        with open(output_path, 'wb') as f:
+            f.write(pdf_bytes)
+        
+        # Save summary
+        with open("output/summary.txt", 'w') as f:
+            f.write(f"Overall Score: {complete_report.overall_score:.1f}/5.0\n\n")
+            f.write(kurzfassung)
+        
+        print(f"\nProcessing complete! Overall score: {complete_report.overall_score:.1f}/5.0")
+        
+        # Save score to GitHub output
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"score={complete_report.overall_score:.1f}\n")
+            f.write(f"blocks_analyzed={len(blocks)}\n")
+        SCRIPT
+        
+        # Run the processing script
+        export VIDEO_URL="$VIDEO_URL"
+        export TOPIC="$TOPIC"
+        export HOST_EMAIL="$HOST_EMAIL"
+        export DURATION="$DURATION"
+        export MEETING_ID="$MEETING_ID"
+        
+        python process_github.py
+    
+    - name: Upload PDF artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: report-pdf
+        path: output/report.pdf
+    
+    - name: Upload summary
+      uses: actions/upload-artifact@v3
+      with:
+        name: summary
+        path: output/summary.txt
+    
+    - name: Send notification
+      if: always()
+      run: |
+        echo "Processing complete!"
+        echo "Score: ${{ steps.process.outputs.score }}"
+        echo "Blocks analyzed: ${{ steps.process.outputs.blocks_analyzed }}"
+        if [ -n "${{ steps.process.outputs.google_drive_url }}" ]; then
+          echo "Google Drive URL: ${{ steps.process.outputs.google_drive_url }}"
+        fi

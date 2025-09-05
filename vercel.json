@@ -1,0 +1,12 @@
+{
+  "name": "dozentenfeedback",
+  "functions": {
+    "api/webhook/process-simple.py": {
+      "maxDuration": 300
+    },
+    "api/webhook/process-split.py": {
+      "maxDuration": 300
+    }
+  },
+  "public": true
+}
