@@ -213,29 +213,35 @@ class ImprovedPDFReportGenerator:
         story.append(Paragraph(title, self.styles['CustomTitle']))
         story.append(Spacer(1, 0.5*cm))
         
-        # Metadata section with better formatting
+        # Metadata section with improved formatting
         if metadata:
+            meta_style = ParagraphStyle('MetaLabel', parent=self.styles['CustomBody'], 
+                                       fontSize=11, fontName='Helvetica-Bold', textColor=colors.HexColor('#5a6c7d'))
+            meta_value_style = ParagraphStyle('MetaValue', parent=self.styles['CustomBody'], 
+                                             fontSize=11, textColor=colors.HexColor('#2c3e50'))
+            
             meta_data = [
-                [Paragraph('<b>Thema:</b>', self.styles['CustomBody']), 
-                 Paragraph(metadata.get('topic', 'N/A'), self.styles['CustomBody'])],
-                [Paragraph('<b>Dozent:</b>', self.styles['CustomBody']), 
-                 Paragraph(metadata.get('host_email', 'N/A'), self.styles['CustomBody'])],
-                [Paragraph('<b>Dauer:</b>', self.styles['CustomBody']), 
-                 Paragraph(f"{metadata.get('duration', 'N/A')} Minuten", self.styles['CustomBody'])],
-                [Paragraph('<b>Datum:</b>', self.styles['CustomBody']), 
-                 Paragraph(datetime.now().strftime('%d.%m.%Y'), self.styles['CustomBody'])],
-                [Paragraph('<b>Meeting ID:</b>', self.styles['CustomBody']), 
-                 Paragraph(metadata.get('meeting_id', 'N/A'), self.styles['CustomBody'])],
+                [Paragraph('Thema:', meta_style), 
+                 Paragraph(metadata.get('topic', 'N/A'), meta_value_style)],
+                [Paragraph('Dozent:', meta_style), 
+                 Paragraph(metadata.get('host_email', 'N/A'), meta_value_style)],
+                [Paragraph('Dauer:', meta_style), 
+                 Paragraph(f"{metadata.get('duration', 'N/A')} Minuten", meta_value_style)],
+                [Paragraph('Datum:', meta_style), 
+                 Paragraph(datetime.now().strftime('%d.%m.%Y'), meta_value_style)],
+                [Paragraph('Meeting ID:', meta_style), 
+                 Paragraph(metadata.get('meeting_id', 'N/A'), meta_value_style)],
             ]
             meta_table = Table(meta_data, colWidths=[3.5*cm, 13*cm])
             meta_table.setStyle(TableStyle([
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#2c3e50')),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+                ('ALIGN', (1, 0), (1, -1), 'LEFT'),
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ('LINEBELOW', (0, -1), (-1, -1), 1, colors.HexColor('#e0e0e0')),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('LEFTPADDING', (0, 0), (0, -1), 0),
+                ('LEFTPADDING', (1, 0), (1, -1), 15),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                ('TOPPADDING', (0, 0), (-1, -1), 2),
             ]))
             story.append(meta_table)
         
@@ -248,31 +254,38 @@ class ImprovedPDFReportGenerator:
         overall_score = complete_report.get('overall_score', 0)
         score_color = self._get_score_color(overall_score)
         
-        # Create score visualization with truly consistent text sizes
-        label_style = ParagraphStyle('LabelStyle', parent=self.styles['CustomBody'], fontSize=11, textColor=colors.HexColor('#5a6c7d'))
-        value_style = ParagraphStyle('ValueStyle', parent=self.styles['CustomBody'], fontSize=11, fontName='Helvetica-Bold')
+        # Create score visualization with improved visual style
+        label_style = ParagraphStyle('LabelStyle', parent=self.styles['CustomBody'], 
+                                    fontSize=12, textColor=colors.HexColor('#5a6c7d'))
+        value_style = ParagraphStyle('ValueStyle', parent=self.styles['CustomBody'], 
+                                    fontSize=14, fontName='Helvetica-Bold')
+        score_value_style = ParagraphStyle('ScoreValueStyle', parent=self.styles['CustomBody'], 
+                                          fontSize=18, fontName='Helvetica-Bold')
         
+        # Create a more visually appealing score display
         score_data = [
             [Paragraph('Gesamtpunktzahl:', label_style), 
-             Paragraph(f'<font color="{score_color.hexval()}"><b>{overall_score:.1f} / 5.0</b></font>', value_style)],
+             Paragraph(f'<font color="{score_color.hexval()}"><b>{overall_score:.1f} / 5.0</b></font>', score_value_style)],
             [Paragraph('Bewertung:', label_style), 
              Paragraph(f'<font color="{score_color.hexval()}"><b>{self._get_score_rating(overall_score)}</b></font>', value_style)],
             [Paragraph('Blöcke analysiert:', label_style), 
              Paragraph(f'<b>{complete_report.get("total_blocks", 0)}</b>', value_style)],
         ]
         
-        score_table = Table(score_data, colWidths=[5*cm, 11.5*cm])
+        score_table = Table(score_data, colWidths=[5.5*cm, 11*cm])
         score_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8f9fa')),
-            ('BOX', (0, 0), (-1, -1), 1.5, colors.HexColor('#3498db')),
-            ('LEFTPADDING', (0, 0), (-1, -1), 12),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('BOX', (0, 0), (-1, -1), 2, colors.HexColor('#3498db')),
+            ('LEFTPADDING', (0, 0), (0, -1), 15),
+            ('LEFTPADDING', (1, 0), (1, -1), 20),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+            ('TOPPADDING', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('ROWBACKGROUNDS', (0, 0), (-1, -1), [colors.HexColor('#ffffff'), colors.HexColor('#f8f9fa'), colors.HexColor('#ffffff')]),
         ]))
         story.append(score_table)
         
