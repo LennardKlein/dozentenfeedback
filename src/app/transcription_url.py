@@ -63,7 +63,7 @@ def transcribe_from_url(url: str, api_key: Optional[str] = None, metadata: Dict[
             format_text=True,
             punctuate=True,
             disfluencies=False,  # Remove um, uh, etc.
-            speech_threshold=0.5  # Adjust for meeting audio quality
+            speech_threshold=0.01  # Lower threshold to handle quiet audio
         )
         
         # Add meeting-specific processing if metadata provided
