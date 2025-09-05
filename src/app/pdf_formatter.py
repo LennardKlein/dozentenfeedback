@@ -254,18 +254,16 @@ class ImprovedPDFReportGenerator:
         overall_score = complete_report.get('overall_score', 0)
         score_color = self._get_score_color(overall_score)
         
-        # Create score visualization with improved visual style
+        # Create score visualization with consistent sizes
         label_style = ParagraphStyle('LabelStyle', parent=self.styles['CustomBody'], 
                                     fontSize=12, textColor=colors.HexColor('#5a6c7d'))
         value_style = ParagraphStyle('ValueStyle', parent=self.styles['CustomBody'], 
                                     fontSize=14, fontName='Helvetica-Bold')
-        score_value_style = ParagraphStyle('ScoreValueStyle', parent=self.styles['CustomBody'], 
-                                          fontSize=18, fontName='Helvetica-Bold')
         
-        # Create a more visually appealing score display
+        # Create a more visually appealing score display with consistent sizing
         score_data = [
             [Paragraph('Gesamtpunktzahl:', label_style), 
-             Paragraph(f'<font color="{score_color.hexval()}"><b>{overall_score:.1f} / 5.0</b></font>', score_value_style)],
+             Paragraph(f'<font color="{score_color.hexval()}"><b>{overall_score:.1f} / 5.0</b></font>', value_style)],
             [Paragraph('Bewertung:', label_style), 
              Paragraph(f'<font color="{score_color.hexval()}"><b>{self._get_score_rating(overall_score)}</b></font>', value_style)],
             [Paragraph('Blöcke analysiert:', label_style), 
