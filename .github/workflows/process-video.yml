@@ -56,11 +56,11 @@ jobs:
         pip install -r requirements.txt
     
     - name: Process video
+      id: process
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         ASSEMBLYAI_API_KEY: ${{ secrets.ASSEMBLYAI_API_KEY }}
-        GOOGLE_DRIVE_CREDENTIALS: ${{ secrets.GOOGLE_DRIVE_CREDENTIALS }}
-        GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+        ZAPIER_WEBHOOK_URL: ${{ secrets.ZAPIER_WEBHOOK_URL }}
       run: |
         # Extract inputs
         if [ "${{ github.event_name }}" == "repository_dispatch" ]; then
@@ -150,21 +150,39 @@ jobs:
         metadata['score'] = complete_report.overall_score
         pdf_bytes = pdf_generator.generate_report_pdf(report_data, metadata)
         
-        # Save to Google Drive if credentials available
-        if os.environ.get('GOOGLE_DRIVE_CREDENTIALS'):
-            print("Step 7: Uploading to Google Drive...")
+        # Send results back to Zapier
+        if os.environ.get('ZAPIER_WEBHOOK_URL'):
+            print("Step 7: Sending results to Zapier...")
+            import requests
+            import base64
+            import json
+            
+            webhook_data = {
+                "status": "success",
+                "metadata": metadata,
+                "score": complete_report.overall_score,
+                "total_blocks": len(blocks),
+                "criteria_scores": {
+                    criterion.name: float(score)
+                    for criterion, score in complete_report.criteria_scores.items()
+                },
+                "summary": kurzfassung,
+                "markdown_report": markdown_report,
+                "pdf_base64": base64.b64encode(pdf_bytes).decode('utf-8'),
+                "strengths": complete_report.overall_strengths[:5] if complete_report.overall_strengths else [],
+                "improvements": complete_report.overall_improvements[:5] if complete_report.overall_improvements else [],
+                "recommendations": complete_report.recommendations[:5] if complete_report.recommendations else []
+            }
+            
             try:
-                drive = GoogleDriveStorage()
-                filename = drive.generate_filename(metadata)
-                result = drive.upload_pdf(pdf_bytes, filename, metadata)
-                print(f"PDF uploaded to Google Drive: {result['web_view_link']}")
-                
-                # Save URL to GitHub output
-                with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-                    f.write(f"google_drive_url={result['web_view_link']}\n")
-                    f.write(f"download_link={result['download_link']}\n")
+                response = requests.post(
+                    os.environ['ZAPIER_WEBHOOK_URL'],
+                    json=webhook_data,
+                    headers={'Content-Type': 'application/json'}
+                )
+                print(f"Webhook sent to Zapier: {response.status_code}")
             except Exception as e:
-                print(f"Failed to upload to Google Drive: {e}")
+                print(f"Failed to send webhook: {e}")
         
         # Save locally as artifact
         output_path = "output/report.pdf"
@@ -206,12 +224,17 @@ jobs:
         name: summary
         path: output/summary.txt
     
-    - name: Send notification
-      if: always()
+    - name: Send failure notification
+      if: failure()
+      env:
+        ZAPIER_WEBHOOK_URL: ${{ secrets.ZAPIER_WEBHOOK_URL }}
       run: |
-        echo "Processing complete!"
-        echo "Score: ${{ steps.process.outputs.score }}"
-        echo "Blocks analyzed: ${{ steps.process.outputs.blocks_analyzed }}"
-        if [ -n "${{ steps.process.outputs.google_drive_url }}" ]; then
-          echo "Google Drive URL: ${{ steps.process.outputs.google_drive_url }}"
+        if [ -n "$ZAPIER_WEBHOOK_URL" ]; then
+          curl -X POST $ZAPIER_WEBHOOK_URL \
+            -H "Content-Type: application/json" \
+            -d '{
+              "status": "failure",
+              "error": "Video processing failed",
+              "workflow_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }'
         fi
