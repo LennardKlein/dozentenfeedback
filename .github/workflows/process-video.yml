@@ -213,13 +213,13 @@ jobs:
                     'overall_score': complete_report.overall_score,
                     'total_blocks': len(blocks),
                     'criteria_scores': {
-                        criterion.name: score 
-                        for criterion, score in complete_report.criteria_scores.items()
+                        criterion.criterion_name_de: criterion.score 
+                        for criterion in complete_report.aggregated_analysis.criteria_scores
                     },
                     'summary': kurzfassung,
-                    'strengths': complete_report.overall_strengths[:5] if complete_report.overall_strengths else [],
-                    'improvements': complete_report.overall_improvements[:5] if complete_report.overall_improvements else [],
-                    'recommendations': complete_report.recommendations[:5] if complete_report.recommendations else []
+                    'strengths': complete_report.aggregated_analysis.strengths[:5] if complete_report.aggregated_analysis.strengths else [],
+                    'improvements': complete_report.aggregated_analysis.improvement_suggestions[:5] if complete_report.aggregated_analysis.improvement_suggestions else [],
+                    'recommendations': []  # No recommendations field in model
                 }
                 
                 metadata['score'] = complete_report.overall_score
@@ -242,15 +242,15 @@ jobs:
                         "score": complete_report.overall_score,
                         "total_blocks": len(blocks),
                         "criteria_scores": {
-                            criterion.name: float(score)
-                            for criterion, score in complete_report.criteria_scores.items()
+                            criterion.criterion_name_de: float(criterion.score)
+                            for criterion in complete_report.aggregated_analysis.criteria_scores
                         },
                         "summary": kurzfassung,
                         "markdown_report": markdown_report,
                         "pdf_base64": base64.b64encode(pdf_bytes).decode('utf-8'),
-                        "strengths": complete_report.overall_strengths[:5] if complete_report.overall_strengths else [],
-                        "improvements": complete_report.overall_improvements[:5] if complete_report.overall_improvements else [],
-                        "recommendations": complete_report.recommendations[:5] if complete_report.recommendations else []
+                        "strengths": complete_report.aggregated_analysis.strengths[:5] if complete_report.aggregated_analysis.strengths else [],
+                        "improvements": complete_report.aggregated_analysis.improvement_suggestions[:5] if complete_report.aggregated_analysis.improvement_suggestions else [],
+                        "raw_analysis": complete_report.aggregated_analysis.raw_analysis if complete_report.aggregated_analysis.raw_analysis else ""
                     }
                     
                     response = requests.post(
