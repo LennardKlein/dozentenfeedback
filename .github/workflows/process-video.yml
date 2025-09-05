@@ -168,7 +168,7 @@ jobs:
                 blocks = chunker.chunk_from_vtt_content(vtt_content)
                 print(f"Created {len(blocks)} blocks")
                 for i, block in enumerate(blocks[:3]):  # Log first 3 blocks as sample
-                    print(f"  Block {i}: {len(block.text)} chars, speaker: {block.speaker}")
+                    print(f"  Block {i}: {len(block.content)} chars")
             except Exception as e:
                 log_error("Chunking", e)
                 raise
