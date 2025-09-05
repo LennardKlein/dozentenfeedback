@@ -81,126 +81,231 @@ jobs:
         cat > process_github.py << 'SCRIPT'
         import os
         import sys
+        import traceback
+        import json
         from pathlib import Path
         
         # Add src to path
         sys.path.insert(0, str(Path.cwd() / "src"))
         
-        from app.transcription_url import transcribe_from_url
-        from app.chunker import TranscriptionChunker
-        from app.analyzer import LectureAnalyzer
-        from app.aggregator import ScoreAggregator
-        from app.formatter import MarkdownFormatter
-        from app.pdf_formatter import PDFReportGenerator
-        from app.google_drive_storage import GoogleDriveStorage
-        
-        # Get inputs from environment
-        video_url = os.environ['VIDEO_URL']
-        metadata = {
-            'topic': os.environ.get('TOPIC', 'Unknown'),
-            'host_email': os.environ.get('HOST_EMAIL', 'mail@lennard-klein.com'),
-            'duration': os.environ.get('DURATION', 'Unknown'),
-            'meeting_id': os.environ.get('MEETING_ID', 'Unknown')
-        }
-        
-        print(f"Processing video: {video_url}")
-        print(f"Metadata: {metadata}")
-        
-        # Process video
-        print("Step 1: Transcribing...")
-        vtt_content = transcribe_from_url(video_url, metadata=metadata)
-        
-        print("Step 2: Chunking...")
-        chunker = TranscriptionChunker()
-        blocks = chunker.chunk_from_vtt_content(vtt_content)
-        print(f"Created {len(blocks)} blocks")
-        
-        print("Step 3: Analyzing...")
-        analyzer = LectureAnalyzer()
-        block_analyses = []
-        for i, block in enumerate(blocks):
-            print(f"Analyzing block {i+1}/{len(blocks)}...")
-            analysis = analyzer.analyze_block(block)
-            block_analyses.append(analysis)
-        
-        print("Step 4: Aggregating...")
-        aggregator = ScoreAggregator()
-        complete_report = aggregator.create_complete_report(block_analyses)
-        
-        print("Step 5: Formatting...")
-        formatter = MarkdownFormatter()
-        markdown_report = formatter.format_complete_report(complete_report)
-        kurzfassung = formatter.format_kurzfassung(complete_report)
-        
-        print("Step 6: Generating PDF...")
-        pdf_generator = PDFReportGenerator()
-        report_data = {
-            'overall_score': complete_report.overall_score,
-            'total_blocks': len(blocks),
-            'criteria_scores': {
-                criterion.name: score 
-                for criterion, score in complete_report.criteria_scores.items()
-            },
-            'summary': kurzfassung,
-            'strengths': complete_report.overall_strengths[:5] if complete_report.overall_strengths else [],
-            'improvements': complete_report.overall_improvements[:5] if complete_report.overall_improvements else [],
-            'recommendations': complete_report.recommendations[:5] if complete_report.recommendations else []
-        }
-        
-        metadata['score'] = complete_report.overall_score
-        pdf_bytes = pdf_generator.generate_report_pdf(report_data, metadata)
-        
-        # Send results back to Zapier
-        if os.environ.get('ZAPIER_WEBHOOK_URL'):
-            print("Step 7: Sending results to Zapier...")
-            import requests
-            import base64
-            import json
+        def log_error(step, error):
+            """Log errors in a structured way"""
+            error_data = {
+                "step": step,
+                "error": str(error),
+                "traceback": traceback.format_exc()
+            }
+            print(f"ERROR in {step}: {error}", file=sys.stderr)
+            print(f"Full traceback:\n{traceback.format_exc()}", file=sys.stderr)
             
-            webhook_data = {
-                "status": "success",
-                "metadata": metadata,
-                "score": complete_report.overall_score,
-                "total_blocks": len(blocks),
-                "criteria_scores": {
-                    criterion.name: float(score)
-                    for criterion, score in complete_report.criteria_scores.items()
-                },
-                "summary": kurzfassung,
-                "markdown_report": markdown_report,
-                "pdf_base64": base64.b64encode(pdf_bytes).decode('utf-8'),
-                "strengths": complete_report.overall_strengths[:5] if complete_report.overall_strengths else [],
-                "improvements": complete_report.overall_improvements[:5] if complete_report.overall_improvements else [],
-                "recommendations": complete_report.recommendations[:5] if complete_report.recommendations else []
+            # Save error to file for artifact
+            os.makedirs("output", exist_ok=True)
+            with open("output/error.json", "w") as f:
+                json.dump(error_data, f, indent=2)
+            
+            # Send error to Zapier if webhook available
+            if os.environ.get('ZAPIER_WEBHOOK_URL'):
+                try:
+                    import requests
+                    requests.post(
+                        os.environ['ZAPIER_WEBHOOK_URL'],
+                        json={
+                            "status": "error",
+                            "step": step,
+                            "error": str(error),
+                            "metadata": {
+                                "video_url": os.environ.get('VIDEO_URL', 'Unknown'),
+                                "topic": os.environ.get('TOPIC', 'Unknown')
+                            }
+                        }
+                    )
+                except:
+                    pass  # Don't fail on webhook error
+            return error_data
+        
+        try:
+            # Import required modules
+            print("Importing modules...")
+            from app.transcription_url import transcribe_from_url
+            from app.chunker import TranscriptionChunker
+            from app.analyzer import LectureAnalyzer
+            from app.aggregator import ScoreAggregator
+            from app.formatter import MarkdownFormatter
+            from app.pdf_formatter import PDFReportGenerator
+            
+            # Get inputs from environment
+            video_url = os.environ.get('VIDEO_URL', '')
+            if not video_url:
+                raise ValueError("VIDEO_URL environment variable is required")
+            
+            metadata = {
+                'topic': os.environ.get('TOPIC', 'Unknown'),
+                'host_email': os.environ.get('HOST_EMAIL', 'mail@lennard-klein.com'),
+                'duration': os.environ.get('DURATION', 'Unknown'),
+                'meeting_id': os.environ.get('MEETING_ID', 'Unknown')
             }
             
+            print(f"=== Starting Video Processing ===")
+            print(f"Video URL: {video_url}")
+            print(f"Metadata: {json.dumps(metadata, indent=2)}")
+            print(f"Environment: Python {sys.version}")
+            print(f"Working directory: {os.getcwd()}")
+            print(f"Available API keys: OPENAI={'set' if os.environ.get('OPENAI_API_KEY') else 'missing'}, ASSEMBLYAI={'set' if os.environ.get('ASSEMBLYAI_API_KEY') else 'missing'}")
+            
+            # Process video with error handling for each step
             try:
-                response = requests.post(
-                    os.environ['ZAPIER_WEBHOOK_URL'],
-                    json=webhook_data,
-                    headers={'Content-Type': 'application/json'}
-                )
-                print(f"Webhook sent to Zapier: {response.status_code}")
+                print("\n=== Step 1: Transcribing ===")
+                print(f"Calling AssemblyAI for: {video_url}")
+                vtt_content = transcribe_from_url(video_url, metadata=metadata)
+                print(f"Transcription complete. Length: {len(vtt_content)} characters")
             except Exception as e:
-                print(f"Failed to send webhook: {e}")
+                log_error("Transcription", e)
+                raise
+            
+            try:
+                print("\n=== Step 2: Chunking ===")
+                chunker = TranscriptionChunker()
+                blocks = chunker.chunk_from_vtt_content(vtt_content)
+                print(f"Created {len(blocks)} blocks")
+                for i, block in enumerate(blocks[:3]):  # Log first 3 blocks as sample
+                    print(f"  Block {i}: {len(block.text)} chars, speaker: {block.speaker}")
+            except Exception as e:
+                log_error("Chunking", e)
+                raise
         
-        # Save locally as artifact
-        output_path = "output/report.pdf"
-        os.makedirs("output", exist_ok=True)
-        with open(output_path, 'wb') as f:
-            f.write(pdf_bytes)
+            try:
+                print("\n=== Step 3: Analyzing ===")
+                analyzer = LectureAnalyzer()
+                block_analyses = []
+                for i, block in enumerate(blocks):
+                    print(f"Analyzing block {i+1}/{len(blocks)}...")
+                    analysis = analyzer.analyze_block(block)
+                    block_analyses.append(analysis)
+                print(f"Analysis complete for all {len(blocks)} blocks")
+            except Exception as e:
+                log_error(f"Analysis (block {i+1}/{len(blocks)})", e)
+                raise
+            
+            try:
+                print("\n=== Step 4: Aggregating ===")
+                aggregator = ScoreAggregator()
+                complete_report = aggregator.create_complete_report(block_analyses)
+                print(f"Overall score: {complete_report.overall_score:.1f}/5.0")
+            except Exception as e:
+                log_error("Aggregation", e)
+                raise
+            
+            try:
+                print("\n=== Step 5: Formatting ===")
+                formatter = MarkdownFormatter()
+                markdown_report = formatter.format_complete_report(complete_report)
+                kurzfassung = formatter.format_kurzfassung(complete_report)
+                print(f"Markdown report: {len(markdown_report)} chars")
+                print(f"Summary: {len(kurzfassung)} chars")
+            except Exception as e:
+                log_error("Formatting", e)
+                raise
+            
+            try:
+                print("\n=== Step 6: Generating PDF ===")
+                pdf_generator = PDFReportGenerator()
+                report_data = {
+                    'overall_score': complete_report.overall_score,
+                    'total_blocks': len(blocks),
+                    'criteria_scores': {
+                        criterion.name: score 
+                        for criterion, score in complete_report.criteria_scores.items()
+                    },
+                    'summary': kurzfassung,
+                    'strengths': complete_report.overall_strengths[:5] if complete_report.overall_strengths else [],
+                    'improvements': complete_report.overall_improvements[:5] if complete_report.overall_improvements else [],
+                    'recommendations': complete_report.recommendations[:5] if complete_report.recommendations else []
+                }
+                
+                metadata['score'] = complete_report.overall_score
+                pdf_bytes = pdf_generator.generate_report_pdf(report_data, metadata)
+                print(f"PDF generated: {len(pdf_bytes)} bytes")
+            except Exception as e:
+                log_error("PDF Generation", e)
+                raise
         
-        # Save summary
-        with open("output/summary.txt", 'w') as f:
-            f.write(f"Overall Score: {complete_report.overall_score:.1f}/5.0\n\n")
-            f.write(kurzfassung)
-        
-        print(f"\nProcessing complete! Overall score: {complete_report.overall_score:.1f}/5.0")
-        
-        # Save score to GitHub output
-        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-            f.write(f"score={complete_report.overall_score:.1f}\n")
-            f.write(f"blocks_analyzed={len(blocks)}\n")
+            # Send results back to Zapier
+            if os.environ.get('ZAPIER_WEBHOOK_URL'):
+                try:
+                    print("\n=== Step 7: Sending results to Zapier ===")
+                    import requests
+                    import base64
+                    
+                    webhook_data = {
+                        "status": "success",
+                        "metadata": metadata,
+                        "score": complete_report.overall_score,
+                        "total_blocks": len(blocks),
+                        "criteria_scores": {
+                            criterion.name: float(score)
+                            for criterion, score in complete_report.criteria_scores.items()
+                        },
+                        "summary": kurzfassung,
+                        "markdown_report": markdown_report,
+                        "pdf_base64": base64.b64encode(pdf_bytes).decode('utf-8'),
+                        "strengths": complete_report.overall_strengths[:5] if complete_report.overall_strengths else [],
+                        "improvements": complete_report.overall_improvements[:5] if complete_report.overall_improvements else [],
+                        "recommendations": complete_report.recommendations[:5] if complete_report.recommendations else []
+                    }
+                    
+                    response = requests.post(
+                        os.environ['ZAPIER_WEBHOOK_URL'],
+                        json=webhook_data,
+                        headers={'Content-Type': 'application/json'}
+                    )
+                    print(f"Webhook sent to Zapier: {response.status_code}")
+                except Exception as e:
+                    print(f"Warning: Failed to send webhook: {e}")
+                    # Don't fail the whole process for webhook errors
+            
+            # Save locally as artifact
+            print("\n=== Saving Artifacts ===")
+            output_path = "output/report.pdf"
+            os.makedirs("output", exist_ok=True)
+            with open(output_path, 'wb') as f:
+                f.write(pdf_bytes)
+            print(f"PDF saved to {output_path}")
+            
+            # Save summary
+            with open("output/summary.txt", 'w') as f:
+                f.write(f"Overall Score: {complete_report.overall_score:.1f}/5.0\n\n")
+                f.write(kurzfassung)
+            print(f"Summary saved to output/summary.txt")
+            
+            # Save full report as JSON for debugging
+            with open("output/report.json", 'w') as f:
+                json.dump({
+                    "metadata": metadata,
+                    "score": complete_report.overall_score,
+                    "total_blocks": len(blocks),
+                    "summary": kurzfassung
+                }, f, indent=2)
+            
+            print(f"\n=== PROCESSING COMPLETE ===")
+            print(f"Overall score: {complete_report.overall_score:.1f}/5.0")
+            print(f"Blocks analyzed: {len(blocks)}")
+            
+            # Save score to GitHub output
+            with open(os.environ.get('GITHUB_OUTPUT', 'github_output.txt'), 'a') as f:
+                f.write(f"score={complete_report.overall_score:.1f}\n")
+                f.write(f"blocks_analyzed={len(blocks)}\n")
+                
+        except Exception as e:
+            print(f"\n=== FATAL ERROR ===")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            print(f"Traceback:\n{traceback.format_exc()}")
+            
+            # Log the error
+            log_error("Main Process", e)
+            
+            # Exit with error code
+            sys.exit(1)
         SCRIPT
         
         # Run the processing script
@@ -223,6 +328,15 @@ jobs:
       with:
         name: summary
         path: output/summary.txt
+    
+    - name: Upload error log if failed
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: error-log
+        path: |
+          output/error.json
+          output/report.json
     
     - name: Send failure notification
       if: failure()
